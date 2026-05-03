@@ -5,13 +5,21 @@ from supabase import create_client
 
 
 def _normalize_supabase_url(raw: str) -> str:
-    """Strip whitespace/quotes and ensure a scheme (avoids SupabaseException: Invalid URL)."""
+    """Strip whitespace/quotes, ensure a scheme, and keep project origin only.
+
+    If ``SUPABASE_URL`` includes ``/rest/v1`` (copy-paste from API docs), the Python
+    client would build ``.../rest/v1/rest/v1/rpc/...`` and PostgREST returns PGRST125.
+    """
     u = raw.strip().strip('"').strip("'")
     if not u:
         return ""
     if not u.startswith(("http://", "https://")):
         u = f"https://{u.lstrip('/')}"
-    return u.rstrip("/")
+    u = u.rstrip("/")
+    suffix = "/rest/v1"
+    while u.endswith(suffix):
+        u = u[: -len(suffix)].rstrip("/")
+    return u
 
 
 @lru_cache(maxsize=1)
@@ -23,6 +31,7 @@ def get_supabase():
         raise RuntimeError(
             "Supabase is not configured: set SUPABASE_URL and SUPABASE_ANON_KEY "
             "(Vercel: Project → Settings → Environment Variables). "
-            "SUPABASE_URL must look like https://<ref>.supabase.co"
+            "SUPABASE_URL must be the project URL only, e.g. https://<ref>.supabase.co "
+            "(do not append /rest/v1)"
         )
     return create_client(url, key)
