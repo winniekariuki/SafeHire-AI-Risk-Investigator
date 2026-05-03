@@ -1,0 +1,66 @@
+# Build and push images to ECR. Deploy with Amazon ECS Express Mode (recommended for new workloads;
+# App Runner is not accepting new customers from 2026-04-30). Update Express services after push, or extend this workflow.
+#
+# Prerequisites:
+# - ECR repositories: safehire-backend, safehire-frontend (create in AWS Console or CLI).
+# - GitHub OIDC role allowing ecr:GetAuthorizationToken, ecr:BatchCheckLayerAvailability,
+#   ecr:PutImage, ecr:InitiateLayerUpload, ecr:UploadLayerPart, ecr:CompleteLayerUpload.
+# - Repo secret: AWS_ROLE_TO_ASSUME (role ARN).
+
+name: Build and push Docker images
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+env:
+  AWS_REGION: us-east-1
+  BACKEND_REPO: safehire-backend
+  FRONTEND_REPO: safehire-frontend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          URI=${ACCOUNT}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.BACKEND_REPO }}
+          docker build -t "${URI}:${IMAGE_TAG}" -t "${URI}:latest" ./backend
+          docker push "${URI}:${IMAGE_TAG}"
+          docker push "${URI}:latest"
+
+      - name: Build and push frontend
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+        run: |
+          : "${NEXT_PUBLIC_API_URL:?Set repo Actions variable NEXT_PUBLIC_API_URL e.g. https://YOUR_DIST.cloudfront.net/api}"
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          URI=${ACCOUNT}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.FRONTEND_REPO }}
+          docker build \
+            --build-arg "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}" \
+            --build-arg "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}" \
+            -t "${URI}:${IMAGE_TAG}" -t "${URI}:latest" ./frontend
+          docker push "${URI}:${IMAGE_TAG}"
+          docker push "${URI}:latest"

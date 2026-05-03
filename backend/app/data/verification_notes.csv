@@ -1,0 +1,5 @@
+worker_id,id_verified,phone_verified
+W001,true,true
+W002,true,true
+W003,false,false
+W004,true,true
