@@ -14,3 +14,5 @@ build/
 # Chroma local persistence
 app/rag/.chroma/
 app/rag/.embedding_models/
+.vercel
+.env*.local

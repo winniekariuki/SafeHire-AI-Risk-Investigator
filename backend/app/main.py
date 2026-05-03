@@ -52,6 +52,7 @@ _origins = _cors_allow_origins()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
+    allow_origin_regex=r"https://safe-hire-ai-risk-investigator.*\.vercel\.app",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

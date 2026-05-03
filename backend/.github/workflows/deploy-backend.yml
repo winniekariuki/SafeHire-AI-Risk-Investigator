@@ -1,0 +1,33 @@
+name: Deploy Backend API to Vercel
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "api/**"
+      - "backend/**"
+      - "requirements.txt"
+      - "vercel.json"
+      - ".github/workflows/deploy-backend.yml"
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_BACKEND_PROJECT_ID }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel backend environment
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy backend API
+        run: vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }}
