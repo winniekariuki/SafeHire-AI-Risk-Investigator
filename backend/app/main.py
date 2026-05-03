@@ -16,6 +16,7 @@ from app.evaluation.harness import run_all_evals
 from app.orchestrator.investigation_orchestrator import run_investigation
 from app.services import profile_service
 from app.reports.followup_qa import answer_followup_question
+from app.reports.platform_qa import answer_platform_question
 from app.schemas import (
     AskRequest,
     AskResponse,
@@ -133,9 +134,13 @@ def investigate_demo(body: InvestigateRequest) -> InvestigateResponse:
 
 @rest.post("/ask", response_model=AskResponse)
 def ask(body: AskRequest) -> AskResponse:
-    """Follow-up Q&A: retrieve worker evidence, attach rule-based risk snapshot, answer with citations."""
+    """Per-worker follow-up (with ``worker_id``) or platform-wide RAG (omit ``worker_id``)."""
+    wid = (body.worker_id or "").strip()
     try:
-        payload = answer_followup_question(body.worker_id, body.question)
+        if wid:
+            payload = answer_followup_question(wid, body.question)
+        else:
+            payload = answer_platform_question(body.question)
         return AskResponse.model_validate(payload)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

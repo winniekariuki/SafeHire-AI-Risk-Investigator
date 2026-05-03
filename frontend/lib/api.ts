@@ -65,14 +65,18 @@ export async function runInvestigation(
 }
 
 export async function askFollowUp(
-  workerId: string,
+  workerId: string | null,
   question: string,
   getToken?: GetToken,
 ): Promise<AskResponse> {
+  const body =
+    workerId == null || workerId === ""
+      ? { question, worker_id: null as string | null }
+      : { worker_id: workerId, question };
   const res = await fetch(`${getApiBase()}/ask`, {
     method: "POST",
     headers: await jsonHeaders(getToken),
-    body: JSON.stringify({ worker_id: workerId, question }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const detail = await res.text();

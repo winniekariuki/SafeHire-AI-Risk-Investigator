@@ -36,22 +36,22 @@ def _truncate(text: str, max_len: int = _MAX_SNIPPET) -> str:
     return t[: max_len - 3].rstrip() + "..."
 
 
-def _gather_evidence(worker_id: str, query: str) -> list[dict[str, str]]:
+def _gather_evidence(worker_id: str, query: str) -> list[dict[str, str | None]]:
     """Worker-specific chunks from Chroma, plus CSV rows if retrieval is thin."""
     wid = worker_id.strip()
     q = query.strip() or "hiring risk references misconduct verification attendance"
     chunks = retrieve_worker_evidence(wid, q, top_k=8)
 
-    out: list[dict[str, str]] = []
+    out: list[dict[str, str | None]] = []
     seen: set[str] = set()
 
     def add(source: str, content: str) -> None:
         c = _truncate(content)
-        key = f"{source}|{c}"
+        key = f"{wid}|{source}|{c}"
         if not c or key in seen:
             return
         seen.add(key)
-        out.append({"source": source, "content": c})
+        out.append({"worker_id": wid, "source": source, "content": c})
 
     for row in chunks:
         src = str(row.get("source") or "Evidence").strip()
@@ -66,10 +66,12 @@ def _gather_evidence(worker_id: str, query: str) -> list[dict[str, str]]:
     return out[:12]
 
 
-def _format_evidence_for_prompt(evidence: list[dict[str, str]]) -> str:
+def _format_evidence_for_prompt(evidence: list[dict[str, str | None]]) -> str:
     lines = []
     for i, e in enumerate(evidence, 1):
-        lines.append(f'{i}. [{e["source"]}] {e["content"]}')
+        w = e.get("worker_id") or ""
+        tag = f"worker {w} · {e['source']}" if w else str(e["source"])
+        lines.append(f"{i}. [{tag}] {e['content']}")
     return "\n".join(lines)
 
 
@@ -87,7 +89,11 @@ Rules:
 Return ONLY valid JSON: {"answer": "<your reply>"}"""
 
 
-def _llm_answer(question: str, evidence: list[dict[str, str]], risk: dict[str, Any]) -> str | None:
+def _llm_answer(
+    question: str,
+    evidence: list[dict[str, str | None]],
+    risk: dict[str, Any],
+) -> str | None:
     if OpenAI is None or not os.getenv("OPENAI_API_KEY"):
         return None
     try:
@@ -115,7 +121,11 @@ def _llm_answer(question: str, evidence: list[dict[str, str]], risk: dict[str, A
         return None
 
 
-def _deterministic_answer(question: str, evidence: list[dict[str, str]], risk: dict[str, Any]) -> str:
+def _deterministic_answer(
+    question: str,
+    evidence: list[dict[str, str | None]],
+    risk: dict[str, Any],
+) -> str:
     qlow = question.lower()
     lvl = str(risk.get("risk_level", "unknown"))
     score = risk.get("score")

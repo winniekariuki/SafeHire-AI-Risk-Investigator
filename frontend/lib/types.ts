@@ -39,7 +39,7 @@ export type InvestigationResponse = {
 
 export type AskResponse = {
   answer: string;
-  evidence: { source: string; content: string }[];
+  evidence: { worker_id?: string | null; source: string; content: string }[];
 };
 
 /** Matches ``EvalRunResponse`` from ``POST /eval/run``. */

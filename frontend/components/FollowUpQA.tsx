@@ -8,7 +8,7 @@ import { askFollowUp } from "@/lib/api";
 type Turn = {
   question: string;
   answer: string;
-  evidence: { source: string; content: string }[];
+  evidence: { worker_id?: string | null; source: string; content: string }[];
 };
 
 export function FollowUpQA({
@@ -106,6 +106,7 @@ export function FollowUpQA({
                           className="rounded-md bg-zinc-50/80 p-2 text-xs dark:bg-zinc-900/40"
                         >
                           <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                            {ev.worker_id ? `${ev.worker_id} · ` : ""}
                             {ev.source}
                           </span>
                           <p className="mt-1 text-zinc-600 dark:text-zinc-400">{ev.content}</p>

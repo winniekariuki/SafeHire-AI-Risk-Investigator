@@ -69,11 +69,21 @@ class InvestigateResponse(BaseModel):
 
 
 class AskRequest(BaseModel):
-    worker_id: str = Field(..., description="CSV worker_id (e.g. W002)")
-    question: str = Field(..., description="Follow-up question about this worker")
+    worker_id: str | None = Field(
+        default=None,
+        description="CSV worker_id (e.g. W002). Omit, null, or blank for platform-wide questions.",
+    )
+    question: str = Field(
+        ...,
+        description="Question about one worker, or across all workers if worker_id is unset.",
+    )
 
 
 class AskEvidenceSnippet(BaseModel):
+    worker_id: str | None = Field(
+        default=None,
+        description="Populated for platform-wide answers (which worker the snippet belongs to).",
+    )
     source: str
     content: str
 
@@ -82,7 +92,7 @@ class AskResponse(BaseModel):
     answer: str
     evidence: list[AskEvidenceSnippet] = Field(
         default_factory=list,
-        description="Supporting snippets shown to the model / user (no extras beyond retrieval + CSV fallbacks)",
+        description="Supporting snippets (per-worker or platform retrieval + CSV fallbacks).",
     )
 
 

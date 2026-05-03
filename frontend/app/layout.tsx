@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, Geist_Mono } from "next/font/google";
+import { AnimatedBackdrop } from "@/components/AnimatedBackdrop";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,8 +31,14 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       {/* suppressHydrationWarning: browser extensions (e.g. Grammarly) mutate <body> attributes */}
-      <body className="flex min-h-full flex-col" suppressHydrationWarning>
-        <ClerkProvider>{children}</ClerkProvider>
+      <body
+        className="relative flex min-h-full flex-col bg-zinc-50 dark:bg-zinc-950"
+        suppressHydrationWarning
+      >
+        <AnimatedBackdrop />
+        <ClerkProvider>
+          <div className="relative z-0 flex min-h-full flex-1 flex-col">{children}</div>
+        </ClerkProvider>
       </body>
     </html>
   );

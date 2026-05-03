@@ -16,6 +16,7 @@ import { RiskSummaryCard } from "@/components/RiskSummaryCard";
 import { SectionCard } from "@/components/SectionCard";
 import { SignalCards } from "@/components/SignalCards";
 import { WorkerProfileCard } from "@/components/WorkerProfileCard";
+import { PlatformAsk } from "@/components/PlatformAsk";
 import { WorkerSelector } from "@/components/WorkerSelector";
 import { fetchWorkers, runInvestigation } from "@/lib/api";
 import type { InvestigationResponse, WorkerOption } from "@/lib/types";
@@ -117,6 +118,7 @@ export default function DashboardPage() {
         />
 
         <div className="flex flex-col gap-6">
+          <PlatformAsk />
           <SectionCard title="Assessment controls">
             {workersError ? (
               <p className="text-sm text-red-600 dark:text-red-400">{workersError}</p>
