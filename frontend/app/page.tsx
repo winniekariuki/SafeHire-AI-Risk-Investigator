@@ -16,8 +16,7 @@ export default async function Home() {
           AI risk investigator
         </h1>
         <p className="mt-4 text-lg leading-relaxed text-zinc-600 dark:text-zinc-400">
-          Sign in to open the investigation dashboard and run assessments against
-          your backend API.
+        Sign in to run evidence-based risk assessments and get clear, actionable hiring recommendations
         </p>
         <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
           <Link
