@@ -2,7 +2,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from app.rag.supabase_client import supabase
+from app.rag.supabase_client import get_supabase
 from app.rag.retriever import get_embedding
 
 def ingest_all():
@@ -23,7 +23,7 @@ def ingest_all():
     for doc in docs:
         embedding = get_embedding(doc["content"])
 
-        supabase.table("worker_documents").insert({
+        get_supabase().table("worker_documents").insert({
             "worker_id": doc["worker_id"],
             "source": doc["source"],
             "content": doc["content"],
@@ -32,6 +32,6 @@ def ingest_all():
 
     print("Done")
 
-print("Done")
+
 if __name__ == "__main__":
     ingest_all()

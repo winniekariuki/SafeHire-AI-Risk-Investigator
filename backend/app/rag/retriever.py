@@ -1,8 +1,10 @@
 # app/rag/retriever.py
 
-from openai import OpenAI
-from app.rag.supabase_client import supabase
 import os
+
+from openai import OpenAI
+
+from app.rag.supabase_client import get_supabase
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -17,7 +19,7 @@ def get_embedding(text: str):
 def retrieve_worker_evidence(worker_id: str, query: str, top_k: int = 5):
     embedding = get_embedding(query)
 
-    response = supabase.rpc(
+    response = get_supabase().rpc(
         "match_worker_documents",
         {
             "query_embedding": embedding,

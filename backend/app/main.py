@@ -3,6 +3,11 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+_backend_dir = Path(__file__).resolve().parent.parent
+load_dotenv(_backend_dir / ".env")
+load_dotenv()
+
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,11 +29,6 @@ from app.schemas import (
     InvestigateResponse,
     WorkerOut,
 )
-
-# Load backend/.env even when uvicorn's cwd is the repo root (not `backend/`).
-_backend_dir = Path(__file__).resolve().parent.parent
-load_dotenv(_backend_dir / ".env")
-load_dotenv()
 
 from app.core.telemetry import configure_langsmith
 
