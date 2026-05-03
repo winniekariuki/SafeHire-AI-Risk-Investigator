@@ -1,0 +1,3 @@
+worker_id,source,report,severity,verified
+W002,Misconduct Report,"Employer reported repeated absenteeism and poor communication.",medium,true
+W004,Misconduct Report,"Employer reported suspected child safety concern and aggressive behavior.",high,true
