@@ -8,6 +8,7 @@ Evidence-grounded **decision support** for domestic-worker background checks. Th
 
 ## Table of contents
 
+- [Live deployment](#live-deployment)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Repository layout](#repository-layout)
@@ -21,6 +22,16 @@ Evidence-grounded **decision support** for domestic-worker background checks. Th
 - [Deployment](#deployment)
 - [Operations & troubleshooting](#operations--troubleshooting)
 - [License & status](#license--status)
+
+---
+
+## Live deployment
+
+| | |
+|---|---|
+| **Production UI (Vercel)** | **[Investigation dashboard](https://safe-hire-ai-risk-investigator-i8fz.vercel.app/dashboard)** |
+
+Sign in with **Clerk**. The frontend must have `NEXT_PUBLIC_API_BASE_URL` (or `NEXT_PUBLIC_API_URL`) set to your deployed API base path **including `/api`**; the backend should list this frontend origin in `CORS_ORIGINS`.
 
 ---
 
@@ -257,7 +268,7 @@ Tests cover risk scoring, sufficiency, orchestrator wiring, and platform Q&A hel
 
 ## Deployment
 
-Target platform: **Vercel** (Fluid / serverless Python for API, Next.js for UI).
+Target platform: **Vercel** (Fluid / serverless Python for API, Next.js for UI). The deployed frontend URL is in **[Live deployment](#live-deployment)** above.
 
 | Concern | Guidance |
 |---------|-----------|
