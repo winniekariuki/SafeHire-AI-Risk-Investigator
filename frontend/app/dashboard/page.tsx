@@ -4,6 +4,7 @@ import { UserButton, useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useState } from "react";
 import { EvidenceList } from "@/components/EvidenceList";
 import { FollowUpQA } from "@/components/FollowUpQA";
+import { PlatformAsk } from "@/components/PlatformAsk";
 import { Header } from "@/components/Header";
 import { ManualReviewAlert } from "@/components/ManualReviewAlert";
 import { MarkdownReport } from "@/components/MarkdownReport";
@@ -12,32 +13,17 @@ import {
   ProcessingStatus,
   type PipelineStep,
 } from "@/components/ProcessingStatus";
+import { AssessmentInsightCards } from "@/components/AssessmentInsightCards";
 import { RiskSummaryCard } from "@/components/RiskSummaryCard";
 import { SectionCard } from "@/components/SectionCard";
 import { SignalCards } from "@/components/SignalCards";
 import { WorkerProfileCard } from "@/components/WorkerProfileCard";
-import { PlatformAsk } from "@/components/PlatformAsk";
 import { WorkerSelector } from "@/components/WorkerSelector";
 import { fetchWorkers, runInvestigation } from "@/lib/api";
 import type { InvestigationResponse, WorkerOption } from "@/lib/types";
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-function BulletedListOrNone({ items }: { items: string[] }) {
-  if (items.length === 0) {
-    return (
-      <p className="text-sm italic text-zinc-500 dark:text-zinc-400">None</p>
-    );
-  }
-  return (
-    <ul className="list-disc space-y-2 pl-4 text-sm text-zinc-700 dark:text-zinc-300">
-      {items.map((item, i) => (
-        <li key={`${i}-${item.slice(0, 64)}`}>{item}</li>
-      ))}
-    </ul>
-  );
 }
 
 export default function DashboardPage() {
@@ -118,7 +104,8 @@ export default function DashboardPage() {
         />
 
         <div className="flex flex-col gap-6">
-          <PlatformAsk />
+          <PlatformAsk enabled={workers.length > 0 && !workersError} />
+
           <SectionCard title="Assessment controls">
             {workersError ? (
               <p className="text-sm text-red-600 dark:text-red-400">{workersError}</p>
@@ -155,17 +142,11 @@ export default function DashboardPage() {
             <>
               <RiskSummaryCard risk_summary={result.risk_summary} />
               <WorkerProfileCard worker={result.worker} />
-              <div className="grid gap-6 lg:grid-cols-3">
-                <SectionCard title="Strengths">
-                  <BulletedListOrNone items={result.strengths} />
-                </SectionCard>
-                <SectionCard title="Concerns">
-                  <BulletedListOrNone items={result.concerns} />
-                </SectionCard>
-                <SectionCard title="Missing information">
-                  <BulletedListOrNone items={result.missing_information} />
-                </SectionCard>
-              </div>
+              <AssessmentInsightCards
+                strengths={result.strengths}
+                concerns={result.concerns}
+                missing_information={result.missing_information}
+              />
               <SignalCards risk_signals={result.risk_signals} />
               <EvidenceList retrieved_evidence={result.retrieved_evidence} />
               <MarkdownReport report={result.report} />
@@ -174,11 +155,18 @@ export default function DashboardPage() {
           ) : null}
 
           {!result && !isRunning && !investigateError ? (
-            <p className="text-center text-sm text-zinc-500 dark:text-zinc-400">
-              Run a risk assessment to populate output from{" "}
-              <code className="rounded bg-zinc-200/80 px-1 dark:bg-zinc-800">POST /api/investigate</code>
-              .
-            </p>
+            <div className="rounded-xl border border-dashed border-zinc-300/80 bg-zinc-50/80 px-6 py-8 text-center dark:border-zinc-700 dark:bg-zinc-900/40">
+              <p className="text-base font-medium text-zinc-800 dark:text-zinc-200">
+                Choose a worker above, then click{" "}
+                <span className="whitespace-nowrap font-semibold text-zinc-950 dark:text-zinc-50">
+                  Run risk assessment
+                </span>{" "}
+                to view risk scores, evidence, and the full report.
+              </p>
+              <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                Results appear here after each run—you can switch workers and run again anytime.
+              </p>
+            </div>
           ) : null}
         </div>
     </div>

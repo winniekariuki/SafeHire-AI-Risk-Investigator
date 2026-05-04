@@ -28,7 +28,8 @@ def run_investigation(
     """
     Load CSV rows → retrieve Chroma evidence → signals → sufficiency → rule-based risk → report.
 
-    Populate Chroma first: ``python -m app.rag.ingest``.
+    Vector matches come from Supabase ``worker_documents``; if none match,
+    reference/misconduct rows from CSV are shown as structured fallback evidence.
     """
     wid = worker_id.strip()
     query = (retrieval_query or "").strip() or DEFAULT_RETRIEVAL_QUERY
@@ -56,6 +57,11 @@ def run_investigation(
             query=query,
             top_k=8,
         )
+        if not retrieved_evidence:
+            retrieved_evidence = retriever.structured_fallback_evidence(
+                references,
+                reports,
+            )
 
         emit_pipeline_event(
             root,

@@ -1,16 +1,21 @@
 """
-Platform-wide Q&A: retrieve evidence across all workers, answer with citations only.
+Platform-wide Q&A: retrieve evidence across workers (Supabase), answer with citations only.
+
+Comparative questions (lowest risk, hiring recommendation) also use the same rule-based
+``score_worker`` outputs as investigations so answers are not limited to semantic retrieval hits.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 from app.core.telemetry import emit_pipeline_event, pipeline_trace
 from app.rag.retriever import retrieve_platform_evidence
-from app.services.profile_service import get_worker
+from app.risk.risk_scorer import score_worker
+from app.services.profile_service import get_worker, list_workers
 
 try:
     from openai import OpenAI
@@ -54,18 +59,135 @@ def _format_evidence_for_prompt(evidence: list[dict[str, str]]) -> str:
 
 _SYSTEM = """You are a SafeHire hiring-risk assistant for a domestic-worker platform.
 
-Answer using ONLY the numbered evidence excerpts (each tagged with a worker id like W001).
+You may receive:
+1) ``platform_risk_rankings`` — rule-based composite scores for ALL workers (lower score = lower risk). Treat these numbers as authoritative for comparisons (who has lowest/highest risk).
+2) Numbered evidence excerpts from document retrieval.
+
 Rules:
-- Do not invent incidents, employers, or behaviors not in the excerpts.
-- Do not give legal or definitive employment conclusions.
-- For questions like "who is good with children?", name only workers whose excerpts support the claim;
-  mention conflicting excerpts if relevant.
-- If excerpts are insufficient, say what is missing.
+- When the user asks who has the lowest/highest risk, or whom to hire / recommend, you MUST base ordering on ``platform_risk_rankings`` by ``score`` (not on retrieval similarity).
+- For other questions, use evidence excerpts; do not invent incidents or employers not in the excerpts.
+- Do not give legal or definitive employment conclusions; frame as decision support.
+- Never answer "insufficient evidence" for ranking/hiring preference questions if ``platform_risk_rankings`` is non-empty — summarize those scores instead and cite evidence only as supporting context.
+- Format the reply as **Markdown** (e.g. `##` headings, `-` bullet lists, **bold** for names and scores).
 
-Return ONLY valid JSON: {"answer": "<your reply>"}"""
+Return ONLY valid JSON: {"answer": "<markdown string>"} (the model will serialize the string; use real newlines in the markdown content)."""
 
 
-def _llm_answer(question: str, evidence: list[dict[str, str]]) -> str | None:
+def _all_worker_risk_rows() -> list[dict[str, Any]]:
+    """Rule-based risk for every CSV worker — same engine as per-worker investigation."""
+    rows: list[dict[str, Any]] = []
+    for w in list_workers():
+        wid = str(w.get("worker_id", "")).strip()
+        if not wid:
+            continue
+        try:
+            r = score_worker(wid)
+        except ValueError:
+            continue
+        name = str(w.get("name") or wid)
+        rows.append(
+            {
+                "worker_id": wid,
+                "name": name,
+                "score": int(r.get("score", 0)),
+                "risk_level": str(r.get("risk_level", "")),
+                "recommendation": str(r.get("recommendation") or ""),
+                "reasons": list(r.get("reasons") or [])[:6],
+            }
+        )
+    rows.sort(key=lambda x: x["score"])
+    return rows
+
+
+def _comparison_intent(question: str) -> str | None:
+    """Detect cross-worker comparison; rule-based scores answer these reliably."""
+    q = question.lower()
+    if re.search(
+        r"\b(lowest|least|minimum|smallest)\b.*\brisk\b|\brisk\b.*\b(lowest|least|minimum|smallest)\b",
+        q,
+    ):
+        return "lowest"
+    if re.search(
+        r"\b(highest|greatest|maximum)\b.*\brisk\b|\brisk\b.*\b(highest|greatest|maximum)\b",
+        q,
+    ):
+        return "highest"
+    if "hire" in q and any(
+        w in q for w in ("recommend", "should", "which", "who", "pick", "choose", "best", "suggest")
+    ):
+        return "hire"
+    if "recommend" in q and "worker" in q:
+        return "hire"
+    return None
+
+
+def _comparison_answer(intent: str, rankings: list[dict[str, Any]]) -> str:
+    if not rankings:
+        return (
+            "**No workers could be scored** from the current CSV dataset. "
+            "Check that workers, verification, references, and misconduct files are loaded."
+        )
+
+    lowest_score = rankings[0]["score"]
+    highest_score = rankings[-1]["score"]
+    tie_low = [r for r in rankings if r["score"] == lowest_score]
+    tie_high = [r for r in rankings if r["score"] == highest_score]
+
+    def fmt_bullet(r: dict[str, Any]) -> str:
+        reasons = r.get("reasons") or []
+        tail = f" — {', '.join(reasons[:3])}" if reasons else ""
+        return (
+            f"- **{r['name']}** (`{r['worker_id']}`): score **{r['score']}**, "
+            f"{r['risk_level']} risk ({r['recommendation']}){tail}"
+        )
+
+    sections: list[str] = []
+
+    if intent == "lowest":
+        names = ", ".join(f"**{r['name']}** (`{r['worker_id']}`)" for r in tie_low)
+        sections.append("## Lowest risk\n\n")
+        sections.append(
+            f"By the rule-based composite scores (lower is better), the lowest risk "
+            f"{'is ' + names if len(tie_low) == 1 else 'workers are ' + names} "
+            f"with score **{lowest_score}**."
+        )
+    elif intent == "highest":
+        names = ", ".join(f"**{r['name']}** (`{r['worker_id']}`)" for r in tie_high)
+        sections.append("## Highest risk\n\n")
+        sections.append(
+            f"By the rule-based composite scores, the highest risk "
+            f"{'is ' + names if len(tie_high) == 1 else 'workers are ' + names} "
+            f"with score **{highest_score}**."
+        )
+    else:
+        top = tie_low[0] if tie_low else rankings[0]
+        sections.append("## Hiring preference (rule-based scores only)\n\n")
+        sections.append(
+            f"Using **only** these rule-based scores (not interviews or local policy), "
+            f"**{top['name']}** (`{top['worker_id']}`) has the lowest composite risk "
+            f"(score **{top['score']}**, **{top['risk_level']}** band).\n\n"
+            "This is **not** a hire/no-hire decision—verify references, contracts, and compliance yourself."
+        )
+
+    if len(rankings) > 1:
+        sections.append("\n### All workers (low → high)\n")
+        bullets = "\n".join(fmt_bullet(r) for r in rankings[:8])
+        sections.append(bullets)
+        if len(rankings) > 8:
+            sections.append("\n- …")
+
+    sections.append(
+        "\n\n---\n\n"
+        "*This is decision support only—not a final suitability determination.*"
+    )
+    return "".join(sections)
+
+
+def _llm_answer(
+    question: str,
+    evidence: list[dict[str, str]],
+    platform_risk_rankings: list[dict[str, Any]],
+) -> str | None:
     if OpenAI is None or not os.getenv("OPENAI_API_KEY"):
         return None
     try:
@@ -73,6 +195,8 @@ def _llm_answer(question: str, evidence: list[dict[str, str]]) -> str | None:
         model = os.getenv("OPENAI_ASK_MODEL", "gpt-4o-mini")
         user_msg = (
             f"Question: {question}\n\n"
+            f"platform_risk_rankings (authoritative for cross-worker risk comparison):\n"
+            f"{json.dumps(platform_risk_rankings, indent=2)}\n\n"
             f"Evidence excerpts:\n{_format_evidence_for_prompt(evidence)}"
         )
         resp = client.chat.completions.create(
@@ -107,7 +231,6 @@ def _deterministic_answer(question: str, evidence: list[dict[str, str]]) -> str:
         wid = e.get("worker_id") or ""
         by_worker.setdefault(wid, []).append(e)
 
-    # Prefer workers with positive cues when question asks about "good" traits
     positive_words = (
         "good",
         "great",
@@ -118,7 +241,15 @@ def _deterministic_answer(question: str, evidence: list[dict[str, str]]) -> str:
         "care",
         "trust",
     )
-    concern_words = ("complaint", "absent", "late", "shouting", "safety", "aggressive", "misconduct")
+    concern_words = (
+        "complaint",
+        "absent",
+        "late",
+        "shouting",
+        "safety",
+        "aggressive",
+        "misconduct",
+    )
 
     ranked: list[tuple[int, str, str]] = []
     for wid, rows in by_worker.items():
@@ -133,49 +264,58 @@ def _deterministic_answer(question: str, evidence: list[dict[str, str]]) -> str:
 
     if not ranked:
         return (
-            "No platform-wide evidence matched this question in the current index. "
-            "Try rephrasing or run per-worker assessments once documents are ingested."
+            "> No platform-wide evidence matched this question in the current index.\n\n"
+            "Ingest worker documents into Supabase or try rephrasing."
         )
 
     parts: list[str] = []
     if "who" in qlow or "which" in qlow:
         top = [r for r in ranked if r[0] > 0][:3]
         if top:
-            for score, wid, _ in top:
+            bullets: list[str] = []
+            for _score, wid, _ in top:
                 name = _worker_display_name(wid)
                 bits = [e["content"] for e in by_worker[wid][:2]]
-                parts.append(
-                    f"**{name}** ({wid}): " + " ".join(f"“{_truncate(b, 180)}”" for b in bits)
-                )
+                quote = " ".join(f"“{_truncate(b, 180)}”" for b in bits)
+                bullets.append(f"- **{name}** (`{wid}`): {quote}")
+            parts.append("### Textual matches\n\n" + "\n".join(bullets))
         else:
             wid = ranked[0][1]
             name = _worker_display_name(wid)
             parts.append(
-                f"Closest textual matches point to **{name}** ({wid}); review citations below — "
-                "evidence may be mixed."
+                f"Closest textual matches point to **{name}** (`{wid}`); review citations below."
             )
 
     if not parts:
-        parts.append("Review the cited excerpts below; the question did not match a simple ranking rule.")
+        parts.append("Review the cited excerpts below for details relevant to your question.")
 
-    parts.append("This is decision support only—not a final suitability determination.")
-    return " ".join(parts)
+    out = "\n\n".join(parts)
+    return (
+        f"{out}\n\n---\n\n"
+        "*This is decision support only—not a final suitability determination.*"
+    )
 
 
 def answer_platform_question(question: str) -> dict[str, Any]:
-    """
-    Retrieve evidence across workers, return answer + snippets (with ``worker_id``).
-    """
+    """Retrieve evidence across workers; return answer + snippets with ``worker_id``."""
     q = question.strip()
     if not q:
         return {"answer": "Please enter a question.", "evidence": []}
 
     with pipeline_trace("safehire.platform_answer", {}) as root:
+        intent = _comparison_intent(q)
+        rankings = _all_worker_risk_rows()
+
         raw = retrieve_platform_evidence(q, top_k=14)
         evidence = _normalize_evidence(raw)
-        llm = _llm_answer(q, evidence)
-        used_llm = llm is not None
-        answer = llm if used_llm else _deterministic_answer(q, evidence)
+
+        if intent and rankings:
+            answer = _comparison_answer(intent, rankings)
+            used_llm = False
+        else:
+            llm = _llm_answer(q, evidence, rankings)
+            used_llm = llm is not None
+            answer = llm if used_llm else _deterministic_answer(q, evidence)
 
         emit_pipeline_event(
             root,
@@ -184,6 +324,7 @@ def answer_platform_question(question: str) -> dict[str, Any]:
                 "evidence_count": len(evidence),
                 "answer_length": len(answer),
                 "used_llm": used_llm,
+                "comparison_intent": intent or "",
             },
         )
 

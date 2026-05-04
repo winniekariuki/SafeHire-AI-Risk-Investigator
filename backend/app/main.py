@@ -134,7 +134,7 @@ def investigate_demo(body: InvestigateRequest) -> InvestigateResponse:
 
 @rest.post("/ask", response_model=AskResponse)
 def ask(body: AskRequest) -> AskResponse:
-    """Per-worker follow-up (with ``worker_id``) or platform-wide RAG (omit ``worker_id``)."""
+    """Per-worker follow-up (``worker_id`` set) or platform-wide RAG (omit ``worker_id``)."""
     wid = (body.worker_id or "").strip()
     try:
         if wid:

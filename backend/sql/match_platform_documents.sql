@@ -1,6 +1,8 @@
--- Cross-worker semantic search for platform-wide RAG (e.g. "who is good with children?").
--- Run in Supabase → SQL Editor. Adjust vector(1536) if your embedding column uses another size
--- (must match OpenAI ``text-embedding-3-small`` dimensions, default 1536).
+-- OPTIONAL: one-shot similarity across all workers (no per-worker RPC loop).
+-- Requires ``worker_documents`` and pgvector.
+
+drop function if exists public.match_platform_documents(vector(1536), integer);
+drop function if exists public.match_platform_documents(vector, integer);
 
 create or replace function public.match_platform_documents(
   query_embedding vector(1536),
@@ -25,4 +27,4 @@ as $$
   limit greatest(1, least(match_count, 50));
 $$;
 
-grant execute on function public.match_platform_documents(vector, int) to anon, authenticated, service_role;
+grant execute on function public.match_platform_documents(vector(1536), integer) to anon, authenticated, service_role;

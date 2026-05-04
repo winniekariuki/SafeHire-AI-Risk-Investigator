@@ -21,6 +21,8 @@ export type RetrievedEvidenceItem = {
   metadata?: {
     source_file?: string;
     risk_area?: string;
+    /** Set when the API filled from CSV because the vector index had no matches. */
+    origin?: "structured_reference" | "structured_misconduct" | string;
   };
 };
 

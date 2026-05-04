@@ -1,12 +1,16 @@
 # app/rag/retriever.py
 
+from __future__ import annotations
+
 import os
 import re
+from typing import Any
 
 from openai import OpenAI
 
 from app.rag.supabase_client import get_supabase
 from app.services.misconduct_service import load_misconduct_reports
+from app.services.profile_service import list_workers
 from app.services.reference_service import load_reference_notes
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -20,37 +24,57 @@ def get_embedding(text: str):
     return response.data[0].embedding
 
 
-def retrieve_worker_evidence(worker_id: str, query: str, top_k: int = 5):
-    embedding = get_embedding(query)
-
+def _match_worker_documents_rpc(
+    worker_id: str,
+    embedding: list[float],
+    match_count: int,
+) -> list[dict]:
     response = get_supabase().rpc(
         "match_worker_documents",
         {
             "query_embedding": embedding,
             "match_worker_id": worker_id,
-            "match_count": top_k,
+            "match_count": match_count,
         },
     ).execute()
-
     results = response.data or []
-
     return [
         {
             "source": r["source"],
             "content": r["content"],
-            "relevance_score": r["similarity"],
+            "relevance_score": float(r.get("similarity") or 0),
         }
         for r in results
     ]
+
+
+def retrieve_worker_evidence(worker_id: str, query: str, top_k: int = 5):
+    embedding = get_embedding(query)
+    return _match_worker_documents_rpc(worker_id, embedding, top_k)
 
 
 def _query_tokens(q: str) -> set[str]:
     return {t for t in re.findall(r"[a-z0-9']+", q.lower()) if len(t) > 2}
 
 
+_TOKEN_ALIASES: dict[str, tuple[str, ...]] = {
+    "childcare": ("children", "child", "kids", "infant", "toddler"),
+    "babysitting": ("children", "child", "babysit"),
+    "nanny": ("children", "child", "care"),
+}
+
+
+def _expand_query_tokens(tokens: set[str]) -> set[str]:
+    out = set(tokens)
+    for t in tokens:
+        if t in _TOKEN_ALIASES:
+            out.update(_TOKEN_ALIASES[t])
+    return out
+
+
 def _csv_platform_evidence(query: str, top_k: int) -> list[dict]:
-    """Keyword overlap over seeded CSVs when Supabase RPC is unavailable."""
-    tokens = _query_tokens(query)
+    """Keyword overlap on seeded CSVs when vector paths return nothing."""
+    tokens = _expand_query_tokens(_query_tokens(query))
     if not tokens:
         tokens = {"worker", "reference", "report"}
 
@@ -100,10 +124,55 @@ def _csv_platform_evidence(query: str, top_k: int) -> list[dict]:
     return out
 
 
+def _retrieve_platform_per_worker_rag(embedding: list[float], top_k: int) -> list[dict]:
+    """One embedding, then match_worker_documents per platform worker; merge by score."""
+    workers = list_workers()
+    if not workers:
+        return []
+
+    n = len(workers)
+    per_worker = max(6, min(20, top_k * 3 // max(n, 1) + 4))
+    pooled: list[dict] = []
+    for row in workers:
+        wid = str(row.get("worker_id", "")).strip()
+        if not wid:
+            continue
+        try:
+            chunks = _match_worker_documents_rpc(wid, embedding, per_worker)
+        except Exception:
+            continue
+        for c in chunks:
+            pooled.append(
+                {
+                    "worker_id": wid,
+                    "source": c["source"],
+                    "content": c["content"],
+                    "relevance_score": float(c["relevance_score"]),
+                }
+            )
+
+    if not pooled:
+        return []
+
+    pooled.sort(key=lambda x: x["relevance_score"], reverse=True)
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for item in pooled:
+        key = (item["worker_id"], item["content"][:120])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+        if len(out) >= top_k:
+            break
+    return out
+
+
 def retrieve_platform_evidence(query: str, top_k: int = 12) -> list[dict]:
     """
-    Evidence across all workers: Supabase ``match_platform_documents`` if present,
-    else CSV keyword retrieval (no embeddings).
+    1) ``match_platform_documents`` if defined and returns rows.
+    2) Else per-worker vector RAG (same embedding, one RPC per worker).
+    3) Else CSV keyword fallback.
     """
     q = query.strip()
     if not q:
@@ -114,6 +183,7 @@ def retrieve_platform_evidence(query: str, top_k: int = 12) -> list[dict]:
     except Exception:
         return _csv_platform_evidence(q, top_k)
 
+    results: list = []
     try:
         response = get_supabase().rpc(
             "match_platform_documents",
@@ -126,15 +196,55 @@ def retrieve_platform_evidence(query: str, top_k: int = 12) -> list[dict]:
     except Exception:
         results = []
 
-    if not results:
-        return _csv_platform_evidence(q, top_k)
+    if results:
+        return [
+            {
+                "worker_id": str(r.get("worker_id") or ""),
+                "source": str(r.get("source") or "Evidence"),
+                "content": str(r.get("content") or ""),
+                "relevance_score": float(r.get("similarity") or 0),
+            }
+            for r in results[:top_k]
+        ]
 
-    return [
-        {
-            "worker_id": str(r.get("worker_id") or ""),
-            "source": str(r.get("source") or "Evidence"),
-            "content": str(r.get("content") or ""),
-            "relevance_score": float(r.get("similarity") or 0),
-        }
-        for r in results
-    ]
+    merged = _retrieve_platform_per_worker_rag(embedding, top_k)
+    if merged:
+        return merged
+
+    return _csv_platform_evidence(q, top_k)
+
+
+def structured_fallback_evidence(
+    references: list[dict[str, object]],
+    reports: list[dict[str, object]],
+) -> list[dict[str, Any]]:
+    """
+    When the vector index returns no rows, surface the same reference/misconduct
+    rows the pipeline already loaded from CSV so the UI is not empty.
+    """
+    chunks: list[dict[str, Any]] = []
+    for r in references:
+        note = str(r.get("note") or "").strip()
+        if not note:
+            continue
+        chunks.append(
+            {
+                "source": str(r.get("source") or "Reference"),
+                "content": note,
+                "relevance_score": 1.0,
+                "metadata": {"origin": "structured_reference"},
+            }
+        )
+    for m in reports:
+        rep = str(m.get("report") or "").strip()
+        if not rep:
+            continue
+        chunks.append(
+            {
+                "source": str(m.get("source") or "Misconduct"),
+                "content": rep,
+                "relevance_score": 1.0,
+                "metadata": {"origin": "structured_misconduct"},
+            }
+        )
+    return chunks

@@ -2,6 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { useCallback, useState } from "react";
+import { AskAnswerMarkdown } from "@/components/AskAnswerMarkdown";
 import { SectionCard } from "@/components/SectionCard";
 import { askFollowUp } from "@/lib/api";
 
@@ -91,9 +92,7 @@ export function FollowUpQA({
                 <p className="border-b border-zinc-100 bg-zinc-50 px-4 py-2 text-sm font-medium text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100">
                   {t.question}
                 </p>
-                <p className="px-4 py-3 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-                  {t.answer}
-                </p>
+                <AskAnswerMarkdown content={t.answer} className="px-4 py-3" />
                 {t.evidence.length ? (
                   <div className="border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
                     <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">

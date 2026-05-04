@@ -70,9 +70,9 @@ export async function askFollowUp(
   getToken?: GetToken,
 ): Promise<AskResponse> {
   const body =
-    workerId == null || workerId === ""
-      ? { question, worker_id: null as string | null }
-      : { worker_id: workerId, question };
+    workerId != null && workerId !== ""
+      ? { worker_id: workerId, question }
+      : { question };
   const res = await fetch(`${getApiBase()}/ask`, {
     method: "POST",
     headers: await jsonHeaders(getToken),

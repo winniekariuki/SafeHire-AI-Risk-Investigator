@@ -86,7 +86,8 @@ Rules:
 - Do not give legal, criminal, or definitive employment conclusions.
 - Frame the reply as decision support: concise, plain language.
 - If excerpts are insufficient to answer, say what is missing.
-Return ONLY valid JSON: {"answer": "<your reply>"}"""
+- Format the reply as **Markdown** (e.g. `##` / `###` headings, **bold** for risk level, bullet lists if helpful).
+Return ONLY valid JSON: {"answer": "<markdown string>"}"""
 
 
 def _llm_answer(
@@ -136,12 +137,13 @@ def _deterministic_answer(
 
     if any(k in qlow for k in ("why", "risk", "medium", "high", "low", "score")):
         parts.append(
-            f"The rule-based assessment rates this worker as **{lvl}** risk"
-            f"{f' (composite score {score})' if score is not None else ''}. "
-            f"Top documented drivers include: {', '.join(reasons[:6]) or 'see evidence excerpts'}."
+            f"## Rule-based risk\n\n"
+            f"The assessment rates this worker as **{lvl}** risk"
+            f"{f' (composite score **{score}**)' if score is not None else ''}. "
+            f"Top documented drivers: {', '.join(reasons[:6]) or 'see evidence excerpts'}."
         )
         if rec:
-            parts.append(f"Recommended posture from rules: {rec}.")
+            parts.append(f"**Recommended posture (rules):** {rec}")
 
     # Surface contrasting snippets (positive vs concern) from evidence only
     positive_hint = next(
@@ -163,9 +165,13 @@ def _deterministic_answer(
     )
 
     if positive_hint:
-        parts.append(f"Positive notes in the supplied evidence include: “{_truncate(positive_hint, 220)}”.")
+        parts.append(
+            f"### Positive signal from evidence\n> “{_truncate(positive_hint, 220)}”"
+        )
     if concern_hint:
-        parts.append(f"Concern-related notes include: “{_truncate(concern_hint, 220)}”.")
+        parts.append(
+            f"### Concern signal from evidence\n> “{_truncate(concern_hint, 220)}”"
+        )
 
     if not parts:
         parts.append(
@@ -174,9 +180,9 @@ def _deterministic_answer(
         )
 
     parts.append(
-        "This is decision support only—not a final suitability or legal determination."
+        "\n\n---\n\n*This is decision support only—not a final suitability or legal determination.*"
     )
-    return " ".join(parts)
+    return "\n\n".join(p for p in parts if p)
 
 
 def answer_followup_question(worker_id: str, question: str) -> dict[str, Any]:
