@@ -26,7 +26,7 @@ def run_investigation(
     retrieval_query: str | None = None,
 ) -> dict[str, Any]:
     """
-    Load CSV rows → retrieve Chroma evidence → signals → sufficiency → rule-based risk → report.
+    Load CSV rows → retrieve vector/RAG evidence → signals → sufficiency → rule-based risk → report.
 
     Vector matches come from Supabase ``worker_documents``; if none match,
     reference/misconduct rows from CSV are shown as structured fallback evidence.

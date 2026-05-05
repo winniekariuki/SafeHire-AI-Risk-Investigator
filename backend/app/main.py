@@ -102,7 +102,7 @@ def list_workers() -> list[WorkerOut]:
 
 @rest.post("/investigation/graph")
 def investigation_graph(body: InvestigationGraphRequest) -> dict:
-    """LangGraph workflow: load → retrieve → signals → sufficiency → branch → report."""
+    """Investigation pipeline (same as ``/investigate`` — calls ``run_investigation``)."""
     try:
         return run_investigation(
             body.worker_id,

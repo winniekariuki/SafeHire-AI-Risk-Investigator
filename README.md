@@ -2,7 +2,7 @@
 
 SafeHire AI Risk Investigator is an evidence-grounded decision-support platform for domestic-worker background checks, combining deterministic risk scoring with RAG and LLM reasoning to produce transparent, reviewable hiring insights.
 
-Built with **OpenAI** (`gpt-4o-mini`, `text-embedding-3-small`), **LangGraph/LangChain**, **Supabase Postgres + pgvector**, **FastAPI**, **Next.js 16 + TypeScript**, **Clerk**, **Docker**, and **Vercel**.
+Built with **OpenAI** (`gpt-4o-mini`, `text-embedding-3-small`), **LangChain** (optional tracing), **Supabase Postgres + pgvector**, **FastAPI**, **Next.js 16 + TypeScript**, **Clerk**, **Docker**, and **Vercel**.
 
 > **Not legal advice.** Outputs support HR diligence only; validate policies, contracts, and local law before hiring decisions.
 
@@ -41,7 +41,7 @@ Sign in with **Clerk**. The frontend must have `NEXT_PUBLIC_API_BASE_URL` (or `N
 
 | Capability | Description |
 |------------|-------------|
-| **Per-worker investigation** | LangGraph pipeline: profile → retrieval → risk signals → sufficiency gate → markdown report. |
+| **Per-worker investigation** | Imperative pipeline (`run_investigation`): profile → retrieval → risk signals → sufficiency gate → markdown report. |
 | **Deterministic risk score** | Same rule engine for investigations and cross-worker comparisons (`score_worker`), capped composite score with Low / Medium / High bands. |
 | **Platform Q&A** | `POST /ask` **without** `worker_id`: cross-worker retrieval + optional `match_platform_documents` RPC; comparison questions (lowest risk, hire recommendation) use **rule-based rankings**, not only embeddings. |
 | **Follow-up Q&A** | `POST /ask` **with** `worker_id`: worker-scoped evidence + risk snapshot; answers formatted as Markdown. |
@@ -62,7 +62,7 @@ flowchart TB
   end
   subgraph api [Backend]
     FastAPI[FastAPI]
-    LG[LangGraph investigation]
+    ORCH[Investigation orchestrator]
     RAG[RAG retriever]
     RS[Risk scorer + platform rankings]
     SB[(Supabase Postgres + pgvector)]
@@ -70,12 +70,12 @@ flowchart TB
   end
   Next --> FastAPI
   Clerk --> Next
-  FastAPI --> LG
+  FastAPI --> ORCH
   FastAPI --> RS
-  LG --> RAG
+  ORCH --> RAG
   RAG --> SB
   RAG --> CSV
-  LG --> CSV
+  ORCH --> CSV
   Next --> MD
 ```
 
@@ -83,7 +83,7 @@ flowchart TB
 |--------|------|
 | **Frontend** | Dashboard: **Ask the platform** (first), worker selector, run investigation, pipeline UI, risk cards, evidence, markdown report, follow-up Q&A. |
 | **Backend** | FastAPI; routes mounted at **`/api/*`** and duplicated at **`/*`** for legacy/local clients (see `app/main.py`). |
-| **Orchestration** | LangGraph: load → retrieve → signals → sufficiency → report branch. |
+| **Orchestration** | **`investigation_orchestrator.run_investigation`**: load CSV → retrieve (RAG + fallback) → extract signals → sufficiency check → risk score → report (and manual-review branch when insufficient). |
 | **Retrieval** | OpenAI `text-embedding-3-small` (**1536** dimensions) — must match Postgres `vector(1536)` on `worker_documents.embedding`. |
 | **Data** | Demo CSVs under `backend/app/data/`; production-like vector store in Supabase after ingest. |
 
@@ -97,7 +97,7 @@ flowchart TB
 │   ├── app/
 │   │   ├── main.py              # FastAPI app, routers, CORS
 │   │   ├── data/                # Seeded CSVs (workers, references, misconduct, …)
-│   │   ├── orchestrator/        # LangGraph investigation
+│   │   ├── orchestrator/        # investigation orchestration (run_investigation)
 │   │   ├── rag/                 # Supabase client, ingest, retriever
 │   │   ├── reports/             # followup_qa.py, platform_qa.py
 │   │   └── risk/                # Deterministic scoring
@@ -229,7 +229,7 @@ All JSON routes are available both under **`/api/...`** and at the same path wit
 | `GET` | `/health`, `/api/health` | Liveness. |
 | `GET` | `/workers` | List workers from CSV (`WorkerOut`). |
 | `POST` | `/investigate` | Full investigation (`InvestigationApiResponse`) — dashboard contract. |
-| `POST` | `/investigation/graph` | LangGraph raw workflow output. |
+| `POST` | `/investigation/graph` | Same investigation payload and response as `/investigate` (calls `run_investigation`). |
 | `POST` | `/investigate/demo` | Legacy demo payload shape. |
 | `POST` | `/ask` | Body: `{ "question": "...", "worker_id": "W001" \| null }`. Omit or blank `worker_id` for **platform** Q&A. |
 | `POST` | `/ingest` | Demo stub acceptance response (batch ingest via CLI is primary). |
