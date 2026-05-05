@@ -6,18 +6,27 @@ import os
 import re
 from typing import Any
 
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
 from app.rag.supabase_client import get_supabase
 from app.services.misconduct_service import load_misconduct_reports
 from app.services.profile_service import list_workers
 from app.services.reference_service import load_reference_notes
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+def _get_openai_client() -> OpenAI:
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY is missing. Set it in backend/.env or export it in your shell before running retrieval/evals."
+        )
+    try:
+        return OpenAI(api_key=api_key)
+    except OpenAIError as exc:
+        raise RuntimeError(f"Failed to initialize OpenAI client: {exc}") from exc
 
 
 def get_embedding(text: str):
-    response = client.embeddings.create(
+    response = _get_openai_client().embeddings.create(
         model="text-embedding-3-small",
         input=text,
     )

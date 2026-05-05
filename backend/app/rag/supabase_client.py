@@ -26,10 +26,13 @@ def _normalize_supabase_url(raw: str) -> str:
 def get_supabase():
     """Create the client on first use so importing the app does not require valid Supabase env."""
     url = _normalize_supabase_url(os.getenv("SUPABASE_URL") or "")
-    key = (os.getenv("SUPABASE_ANON_KEY") or "").strip().strip('"').strip("'")
+    # Prefer service-role key for backend ingest jobs (bypasses RLS), fallback to anon.
+    raw_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or ""
+    key = raw_key.strip().strip('"').strip("'")
     if not url or not key:
         raise RuntimeError(
-            "Supabase is not configured: set SUPABASE_URL and SUPABASE_ANON_KEY "
+            "Supabase is not configured: set SUPABASE_URL and one of "
+            "SUPABASE_SERVICE_ROLE_KEY / SUPABASE_ANON_KEY "
             "(Vercel: Project → Settings → Environment Variables). "
             "SUPABASE_URL must be the project URL only, e.g. https://<ref>.supabase.co "
             "(do not append /rest/v1)"

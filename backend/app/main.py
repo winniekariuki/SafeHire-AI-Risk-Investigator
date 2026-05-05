@@ -169,7 +169,7 @@ def eval_summary() -> EvalSummaryResponse:
 
 @rest.post("/eval/run", response_model=EvalRunResponse)
 def eval_run() -> EvalRunResponse:
-    """Execute retrieval, classifier, and end-to-end suites (may take tens of seconds)."""
+    """Execute retrieval evaluation suite (may take tens of seconds)."""
     return EvalRunResponse.model_validate(run_all_evals())
 
 

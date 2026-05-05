@@ -1,6 +1,8 @@
 # SafeHire AI Risk Investigator
 
-Evidence-grounded **decision support** for domestic-worker background checks. The system combines **structured CSV profiles**, **Supabase + pgvector RAG** (with CSV fallbacks), **deterministic rule-based risk scoring**, **LangGraph** orchestration, and **LLM** narrative generation so hiring teams see what is documented, what is uncertain, and what should be reviewed manually.
+SafeHire AI Risk Investigator is an evidence-grounded decision-support platform for domestic-worker background checks, combining deterministic risk scoring with RAG and LLM reasoning to produce transparent, reviewable hiring insights.
+
+Built with **OpenAI** (`gpt-4o-mini`, `text-embedding-3-small`), **LangGraph/LangChain**, **Supabase Postgres + pgvector**, **FastAPI**, **Next.js 16 + TypeScript**, **Clerk**, **Docker**, and **Vercel**.
 
 > **Not legal advice.** Outputs support HR diligence only; validate policies, contracts, and local law before hiring decisions.
 
@@ -175,7 +177,8 @@ Open `http://localhost:3000`, sign in, use **Ask the platform** and **Run risk a
 |----------|----------|---------|
 | `OPENAI_API_KEY` | Yes (for full features) | Embeddings, signal extraction, reports, Q&A. |
 | `SUPABASE_URL` | For RAG | Project URL only, e.g. `https://<ref>.supabase.co` — **no** `/rest/v1` suffix. |
-| `SUPABASE_ANON_KEY` | For RAG | Supabase anon key (or a key allowed to call RPC + ingest). |
+| `SUPABASE_SERVICE_ROLE_KEY` | Recommended for backend ingest | Service-role key for server-side writes/RPC (bypasses RLS). |
+| `SUPABASE_ANON_KEY` | For RAG | Anon key when policies allow required read/write RPC access. |
 | `OPENAI_SIGNAL_MODEL` | No | Default `gpt-4o-mini`. |
 | `OPENAI_ASK_MODEL` | No | Default `gpt-4o-mini` for `/ask` when LLM path is used. |
 | `CORS_ORIGINS` | Production | Comma-separated browser origins; omit locally for permissive defaults. |
@@ -231,7 +234,7 @@ All JSON routes are available both under **`/api/...`** and at the same path wit
 | `POST` | `/ask` | Body: `{ "question": "...", "worker_id": "W001" \| null }`. Omit or blank `worker_id` for **platform** Q&A. |
 | `POST` | `/ingest` | Demo stub acceptance response (batch ingest via CLI is primary). |
 | `GET` | `/eval/summary` | Eval placeholder summary. |
-| `POST` | `/eval/run` | Runs evaluation harness (can take tens of seconds). |
+| `POST` | `/eval/run` | Runs retrieval eval harness and returns JSON metrics (can take tens of seconds). |
 
 Interactive schema: **`/docs`** (Swagger UI).
 
@@ -263,6 +266,32 @@ pytest tests/ --cov=app --cov-report=term-missing
 ```
 
 Tests cover risk scoring, sufficiency, orchestrator wiring, and platform Q&A helpers. Some suites call OpenAI or Supabase when not mocked — use mocks or network as appropriate in CI.
+
+### Retrieval benchmark eval (RAG quality)
+
+The retrieval suite now uses a labeled benchmark at [`backend/app/evaluation/retrieval_benchmark.json`](backend/app/evaluation/retrieval_benchmark.json) and reports true ranking metrics:
+
+- `Precision@K`
+- `Recall@K`
+- `MRR@K`
+- `nDCG@K`
+- `MAP@K`
+- `HitRate@K`
+
+It also emits CI-friendly gate results under `aggregate.ci_gates` with per-check `status` (`pass` / `warn` / `fail`) and `overall_pass`.
+
+Run:
+
+```bash
+cd backend
+python run_evals.py retrieval
+```
+
+For CI with custom benchmark file:
+
+```bash
+RETRIEVAL_BENCHMARK_PATH=backend/app/evaluation/retrieval_benchmark.json python backend/run_evals.py retrieval
+```
 
 ---
 

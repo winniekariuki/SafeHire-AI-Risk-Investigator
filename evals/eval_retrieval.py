@@ -17,7 +17,7 @@ from app.evaluation.harness import run_retrieval_eval
 
 
 def main() -> None:
-    print(json.dumps(run_retrieval_eval(), indent=2))
+    print(json.dumps(run_retrieval_eval(), indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

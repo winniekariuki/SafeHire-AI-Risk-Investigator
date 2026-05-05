@@ -23,6 +23,16 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+_BACKEND_ROOT = _REPO_ROOT / "backend"
+
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover - optional dependency guard
+    load_dotenv = None
+
+if load_dotenv is not None:
+    load_dotenv(_BACKEND_ROOT / ".env")
+    load_dotenv()
 
 _MODULES = {
     "retrieval": "evals.eval_retrieval",

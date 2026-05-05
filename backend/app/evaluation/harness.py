@@ -7,22 +7,23 @@ CLI modules under repo ``evals/`` should call these functions when ``backend`` i
 from __future__ import annotations
 
 import json
+import math
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
-
-from app.orchestrator.investigation_orchestrator import run_investigation
-from app.rag.retriever import retrieve_worker_evidence
-from app.risk.signal_extractor import extract_signals
 
 # --- Retrieval -----------------------------------------------------------------
 
-RETRIEVAL_CASES: list[dict[str, object]] = [
-    {
-        "worker_id": "W002",
-        "query": "Find evidence of absenteeism",
-        "expected_keywords": ["late", "disappeared", "absenteeism"],
-        "k": 8,
-    },
+_DEFAULT_RETRIEVAL_BENCHMARK_PATH = (
+    Path(__file__).resolve().parent / "retrieval_benchmark.json"
+)
+
+_RETRIEVAL_CI_TARGETS: list[dict[str, float | int | str]] = [
+    {"metric": "recall_at_k", "k": 3, "pass_threshold": 0.9, "warn_threshold": 0.75},
+    {"metric": "ndcg_at_k", "k": 3, "pass_threshold": 0.8, "warn_threshold": 0.65},
+    {"metric": "map_at_k", "k": 3, "pass_threshold": 0.75, "warn_threshold": 0.6},
+    {"metric": "hit_rate_at_k", "k": 3, "pass_threshold": 1.0, "warn_threshold": 0.9},
 ]
 
 
@@ -30,63 +31,225 @@ def _normalize(text: str) -> str:
     return text.lower()
 
 
-def _keyword_coverage(chunks: list[dict[str, object]], keywords: list[str]) -> float:
-    if not keywords:
-        return 1.0
-    blob = _normalize(" ".join(str(c.get("content") or "") for c in chunks))
-    hits = sum(1 for kw in keywords if kw.lower() in blob)
-    return hits / len(keywords)
+def _load_retrieval_cases() -> list[dict[str, Any]]:
+    raw_path = Path(str(os.getenv("RETRIEVAL_BENCHMARK_PATH") or _DEFAULT_RETRIEVAL_BENCHMARK_PATH))
+    payload = json.loads(raw_path.read_text(encoding="utf-8"))
+    cases = payload.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("retrieval benchmark must contain a non-empty 'cases' list")
+    return cases
 
 
-def _recall_at_k_keyword_proxy(
-    chunks: list[dict[str, object]],
-    keywords: list[str],
-) -> float:
-    return _keyword_coverage(chunks, keywords)
+def _doc_match(chunk: dict[str, Any], qrel: dict[str, Any]) -> bool:
+    chunk_source = _normalize(str(chunk.get("source") or ""))
+    chunk_content = _normalize(str(chunk.get("content") or ""))
+    qrel_source = _normalize(str(qrel.get("source") or ""))
+    qrel_substring = _normalize(str(qrel.get("content_substring") or ""))
+    if qrel_source and qrel_source != chunk_source:
+        return False
+    return bool(qrel_substring) and qrel_substring in chunk_content
 
 
-def _mrr_first_keyword_hit(chunks: list[dict[str, object]], keywords: list[str]) -> float:
-    if not keywords:
-        return 1.0
-    kws = [k.lower() for k in keywords]
-    for rank, ch in enumerate(chunks, start=1):
-        text = _normalize(str(ch.get("content") or ""))
-        if any(kw in text for kw in kws):
+def _align_ranked_relevance(
+    chunks: list[dict[str, Any]],
+    qrels: list[dict[str, Any]],
+) -> tuple[list[int], list[str]]:
+    """
+    Convert retrieved chunks into graded relevance labels aligned by rank.
+
+    ``aligned_relevance[i]`` is the graded relevance of the chunk at rank i+1.
+    A qrel is matched at most once.
+    """
+    remaining = list(qrels)
+    aligned_relevance: list[int] = []
+    matched_ids: list[str] = []
+    for chunk in chunks:
+        hit_idx = -1
+        for idx, qrel in enumerate(remaining):
+            if _doc_match(chunk, qrel):
+                hit_idx = idx
+                break
+        if hit_idx == -1:
+            aligned_relevance.append(0)
+            continue
+        hit = remaining.pop(hit_idx)
+        rel = int(hit.get("relevance", 1))
+        aligned_relevance.append(max(0, rel))
+        matched_ids.append(str(hit.get("id") or ""))
+    return aligned_relevance, matched_ids
+
+
+def _precision_at_k(aligned_relevance: list[int], k: int) -> float:
+    if k <= 0:
+        return 0.0
+    top_k = aligned_relevance[:k]
+    hits = sum(1 for rel in top_k if rel > 0)
+    return hits / k
+
+
+def _recall_at_k(aligned_relevance: list[int], k: int, num_relevant: int) -> float:
+    if num_relevant <= 0:
+        return 0.0
+    top_k = aligned_relevance[:k]
+    hits = sum(1 for rel in top_k if rel > 0)
+    return hits / num_relevant
+
+
+def _mrr_at_k(aligned_relevance: list[int], k: int) -> float:
+    for rank, rel in enumerate(aligned_relevance[:k], start=1):
+        if rel > 0:
             return 1.0 / rank
     return 0.0
 
 
-def _retrieval_run_case(case: dict[str, object]) -> dict[str, object]:
+def _hit_rate_at_k(aligned_relevance: list[int], k: int) -> float:
+    return 1.0 if any(rel > 0 for rel in aligned_relevance[:k]) else 0.0
+
+
+def _average_precision_at_k(aligned_relevance: list[int], k: int) -> float:
+    top_k = aligned_relevance[:k]
+    num_relevant_in_top_k = sum(1 for rel in top_k if rel > 0)
+    if num_relevant_in_top_k == 0:
+        return 0.0
+    precision_sum = 0.0
+    hits = 0
+    for rank, rel in enumerate(top_k, start=1):
+        if rel <= 0:
+            continue
+        hits += 1
+        precision_sum += hits / rank
+    return precision_sum / num_relevant_in_top_k
+
+
+def _dcg_at_k(aligned_relevance: list[int], k: int) -> float:
+    dcg = 0.0
+    for rank, rel in enumerate(aligned_relevance[:k], start=1):
+        if rel <= 0:
+            continue
+        dcg += (2**rel - 1) / math.log2(rank + 1)
+    return dcg
+
+
+def _ndcg_at_k(aligned_relevance: list[int], qrels: list[dict[str, Any]], k: int) -> float:
+    dcg = _dcg_at_k(aligned_relevance, k)
+    ideal = sorted((max(0, int(q.get("relevance", 1))) for q in qrels), reverse=True)
+    idcg = _dcg_at_k(ideal, k)
+    if idcg == 0:
+        return 0.0
+    return dcg / idcg
+
+
+def _retrieval_run_case(case: dict[str, Any]) -> dict[str, Any]:
+    from app.rag.retriever import retrieve_worker_evidence
+
     worker_id = str(case["worker_id"])
     query = str(case["query"])
-    keywords = list(case["expected_keywords"])  # type: ignore[list-item]
-    k = int(case.get("k", 8))
-    chunks = retrieve_worker_evidence(worker_id, query, top_k=k)
-    cov = _keyword_coverage(chunks, keywords)
-    r_at_k = _recall_at_k_keyword_proxy(chunks, keywords)
-    mrr = _mrr_first_keyword_hit(chunks, keywords)
+    qrels = list(case.get("relevant_documents") or [])
+    k_values = [int(k) for k in case.get("k_values", [1, 3, 5, 8])]
+    k_values = sorted({k for k in k_values if k > 0})
+    k_max = max(k_values) if k_values else 8
+
+    chunks = retrieve_worker_evidence(worker_id, query, top_k=k_max)
+    aligned_relevance, matched_ids = _align_ranked_relevance(chunks, qrels)
+    num_relevant = len(qrels)
+
+    metrics_by_k: dict[str, dict[str, float]] = {}
+    for k in k_values:
+        metrics_by_k[str(k)] = {
+            "precision_at_k": round(_precision_at_k(aligned_relevance, k), 4),
+            "recall_at_k": round(_recall_at_k(aligned_relevance, k, num_relevant), 4),
+            "mrr_at_k": round(_mrr_at_k(aligned_relevance, k), 4),
+            "ndcg_at_k": round(_ndcg_at_k(aligned_relevance, qrels, k), 4),
+            "map_at_k": round(_average_precision_at_k(aligned_relevance, k), 4),
+            "hit_rate_at_k": round(_hit_rate_at_k(aligned_relevance, k), 4),
+        }
+
     return {
+        "case_id": str(case.get("id") or f"{worker_id}:{query[:32]}"),
         "worker_id": worker_id,
         "query": query,
-        "k": k,
-        "num_chunks": len(chunks),
-        "keyword_coverage": round(cov, 4),
-        "recall_at_k": round(r_at_k, 4),
-        "mrr": round(mrr, 4),
-        "expected_keywords": keywords,
+        "k_values": k_values,
+        "requested_top_k": k_max,
+        "num_chunks_retrieved": len(chunks),
+        "num_relevant_documents": num_relevant,
+        "matched_relevant_ids": matched_ids,
+        "metrics_by_k": metrics_by_k,
     }
 
 
 def run_retrieval_eval() -> dict[str, Any]:
-    rows = [_retrieval_run_case(c) for c in RETRIEVAL_CASES]
-    n = len(rows)
+    rows = [_retrieval_run_case(c) for c in _load_retrieval_cases()]
+    n = len(rows) or 1
+    k_values = sorted({k for r in rows for k in r.get("k_values", [])})
+
+    def _avg(metric_name: str, k: int) -> float:
+        total = sum(
+            float(r["metrics_by_k"].get(str(k), {}).get(metric_name, 0.0)) for r in rows
+        )
+        return round(total / n, 4)
+
+    mean_precision = {str(k): _avg("precision_at_k", k) for k in k_values}
+    mean_recall = {str(k): _avg("recall_at_k", k) for k in k_values}
+    mean_mrr = {str(k): _avg("mrr_at_k", k) for k in k_values}
+    mean_ndcg = {str(k): _avg("ndcg_at_k", k) for k in k_values}
+    mean_map = {str(k): _avg("map_at_k", k) for k in k_values}
+    mean_hit_rate = {str(k): _avg("hit_rate_at_k", k) for k in k_values}
+
+    metric_aggregates: dict[str, dict[str, float]] = {
+        "precision_at_k": mean_precision,
+        "recall_at_k": mean_recall,
+        "mrr_at_k": mean_mrr,
+        "ndcg_at_k": mean_ndcg,
+        "map_at_k": mean_map,
+        "hit_rate_at_k": mean_hit_rate,
+    }
+
+    ci_items: list[dict[str, Any]] = []
+    failed_checks: list[str] = []
+    for target in _RETRIEVAL_CI_TARGETS:
+        metric = str(target["metric"])
+        k = int(target["k"])
+        pass_threshold = float(target["pass_threshold"])
+        warn_threshold = float(target["warn_threshold"])
+        observed = float(metric_aggregates.get(metric, {}).get(str(k), 0.0))
+        status = (
+            "pass"
+            if observed >= pass_threshold
+            else "warn"
+            if observed >= warn_threshold
+            else "fail"
+        )
+        check = {
+            "metric": metric,
+            "k": k,
+            "value": round(observed, 4),
+            "pass_threshold": pass_threshold,
+            "warn_threshold": warn_threshold,
+            "status": status,
+            "pass": status == "pass",
+        }
+        ci_items.append(check)
+        if status != "pass":
+            failed_checks.append(f"{metric}@{k}")
+
     return {
+        "suite": "retrieval",
+        "schema_version": "1.0.0",
         "cases": rows,
         "aggregate": {
-            "mean_keyword_coverage": round(sum(r["keyword_coverage"] for r in rows) / n, 4),
-            "mean_recall_at_k": round(sum(r["recall_at_k"] for r in rows) / n, 4),
-            "mean_mrr": round(sum(r["mrr"] for r in rows) / n, 4),
-            "num_cases": n,
+            "k_values": k_values,
+            "mean_precision_at_k": mean_precision,
+            "mean_recall_at_k": mean_recall,
+            "mean_mrr_at_k": mean_mrr,
+            "mean_ndcg_at_k": mean_ndcg,
+            "mean_map_at_k": mean_map,
+            "mean_hit_rate_at_k": mean_hit_rate,
+            "num_cases": len(rows),
+            "ci_gates": {
+                "overall_pass": len(failed_checks) == 0,
+                "items": ci_items,
+                "failed_checks": failed_checks,
+            },
         },
     }
 
@@ -146,6 +309,8 @@ def _json_validity(obj: Any) -> bool:
 
 
 def _classifier_run_case(case: dict[str, Any]) -> dict[str, Any]:
+    from app.risk.signal_extractor import extract_signals
+
     text = str(case["text"])
     expected_rs = set(case["expected_risk_signals"])
     expected_sev = case.get("expected_severity")
@@ -230,6 +395,8 @@ E2E_CASES: list[dict[str, Any]] = [
 
 
 def _e2e_run_case(case: dict[str, Any]) -> dict[str, Any]:
+    from app.orchestrator.investigation_orchestrator import run_investigation
+
     wid = str(case["worker_id"])
     out = run_investigation(wid)
     rs = out.get("risk_summary") or {}
@@ -287,7 +454,7 @@ def run_end_to_end_eval() -> dict[str, Any]:
 
 
 def run_all_evals() -> dict[str, Any]:
-    """Run all three suites; failures are captured per suite without aborting."""
+    """Run retrieval eval only. ``classifier`` / ``end_to_end`` are left null for API compatibility."""
     payload: dict[str, Any] = {
         "ran_at": datetime.now(timezone.utc).isoformat(),
         "retrieval": None,
@@ -295,13 +462,8 @@ def run_all_evals() -> dict[str, Any]:
         "end_to_end": None,
         "errors": {},
     }
-    for key, fn in (
-        ("retrieval", run_retrieval_eval),
-        ("classifier", run_classifier_eval),
-        ("end_to_end", run_end_to_end_eval),
-    ):
-        try:
-            payload[key] = fn()
-        except Exception as exc:  # pragma: no cover - defensive for UI/API
-            payload["errors"][key] = str(exc)
+    try:
+        payload["retrieval"] = run_retrieval_eval()
+    except Exception as exc:  # pragma: no cover - defensive for UI/API
+        payload["errors"]["retrieval"] = str(exc)
     return payload

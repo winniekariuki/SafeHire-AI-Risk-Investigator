@@ -1,0 +1,80 @@
+{
+  "benchmark_name": "safehire_worker_retrieval_v1",
+  "description": "Small labeled benchmark for worker-scoped evidence retrieval quality.",
+  "cases": [
+    {
+      "id": "w002_absenteeism_risk",
+      "worker_id": "W002",
+      "query": "Find evidence of absenteeism and poor communication.",
+      "k_values": [1, 3, 5, 8],
+      "relevant_documents": [
+        {
+          "id": "w002_misconduct_absenteeism",
+          "source": "Misconduct Report",
+          "content_substring": "repeated absenteeism and poor communication",
+          "relevance": 3
+        },
+        {
+          "id": "w002_reference_late_disappeared",
+          "source": "Reference Note",
+          "content_substring": "often came late and once disappeared for two days",
+          "relevance": 2
+        }
+      ]
+    },
+    {
+      "id": "w004_child_safety_concern",
+      "worker_id": "W004",
+      "query": "Find documented child safety concerns and aggressive behavior.",
+      "k_values": [1, 3, 5, 8],
+      "relevant_documents": [
+        {
+          "id": "w004_misconduct_child_safety",
+          "source": "Misconduct Report",
+          "content_substring": "suspected child safety concern and aggressive behavior",
+          "relevance": 3
+        },
+        {
+          "id": "w004_reference_shouting_absences",
+          "source": "Reference Note",
+          "content_substring": "complaints about shouting at children and unexplained absences",
+          "relevance": 2
+        }
+      ]
+    },
+    {
+      "id": "w001_positive_reliability",
+      "worker_id": "W001",
+      "query": "Find evidence the worker is punctual and good with children.",
+      "k_values": [1, 3, 5, 8],
+      "relevant_documents": [
+        {
+          "id": "w001_reference_reliable_children",
+          "source": "Reference Note",
+          "content_substring": "reliable, punctual, and good with children",
+          "relevance": 3
+        }
+      ]
+    },
+    {
+      "id": "w002_lateness_history",
+      "worker_id": "W002",
+      "query": "What evidence shows lateness or disappearing from work?",
+      "k_values": [1, 3, 5, 8],
+      "relevant_documents": [
+        {
+          "id": "w002_reference_late_disappeared_v2",
+          "source": "Reference Note",
+          "content_substring": "often came late and once disappeared for two days",
+          "relevance": 3
+        },
+        {
+          "id": "w002_misconduct_absenteeism_v2",
+          "source": "Misconduct Report",
+          "content_substring": "repeated absenteeism and poor communication",
+          "relevance": 1
+        }
+      ]
+    }
+  ]
+}

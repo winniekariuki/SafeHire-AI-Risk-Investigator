@@ -44,16 +44,16 @@ export type AskResponse = {
   evidence: { worker_id?: string | null; source: string; content: string }[];
 };
 
-/** Matches ``EvalRunResponse`` from ``POST /eval/run``. */
+/** Matches ``EvalRunResponse`` from ``POST /eval/run`` (retrieval only; other suite keys null). */
 export type EvalRunResponse = {
   ran_at: string;
   retrieval: EvalSuiteResult | null;
-  classifier: EvalSuiteResult | null;
-  end_to_end: EvalSuiteResult | null;
+  classifier?: EvalSuiteResult | null;
+  end_to_end?: EvalSuiteResult | null;
   errors: Record<string, string>;
 };
 
 export type EvalSuiteResult = {
   cases?: unknown[];
-  aggregate?: Record<string, number | null>;
+  aggregate?: Record<string, unknown>;
 };

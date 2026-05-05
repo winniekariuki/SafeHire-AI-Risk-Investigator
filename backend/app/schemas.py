@@ -118,7 +118,7 @@ class EvalSummaryResponse(BaseModel):
 
 
 class EvalRunResponse(BaseModel):
-    """Payload from ``POST /eval/run`` — full metrics for dashboard charts."""
+    """Payload from ``POST /eval/run`` — retrieval benchmark metrics (other suite keys null)."""
 
     ran_at: str
     retrieval: dict[str, Any] | None = None

@@ -1,4 +1,4 @@
-"""Offline evaluation harness used by CLI scripts and ``POST /eval/run``."""
+"""Offline evaluation harness. ``POST /eval/run`` runs retrieval eval only; other suites are for direct/CLI use."""
 
 from app.evaluation.harness import (
     run_all_evals,
